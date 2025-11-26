@@ -1,6 +1,17 @@
-# LLM Kernel Latency Profiling Project
+# CHIP: Calibrated Hardware Performance in Inference Prediction
 
-This project contains a set of Python scripts designed to measure the execution latency of common deep learning operations (kernels) that are fundamental to Large Language Model (LLM) inference. The goal is to collect performance data on these individual operations to better understand and predict the overall inference time of complex models like those run with vLLM.
+**CHIP** is a framework for predicting Large Language Model (LLM) inference latency by calibrating and characterizing GPU hardware performance. Rather than simply profiling kernels in isolation, CHIP aims to build an accurate latency prediction model by understanding hardware limits and bottlenecks through systematic benchmarking and Roofline analysis.
+
+The project measures GPU performance characteristics and operation latencies to predict the inference time of complex models like those run with vLLM.
+
+## Project Goals
+
+CHIP addresses the challenge of accurately predicting LLM inference latency by:
+
+1. **Hardware Calibration**: Measuring actual GPU performance limits (peak FLOPS, memory bandwidth, ridge point) rather than relying on theoretical specifications
+2. **Bottleneck Identification**: Using Roofline model analysis to determine whether operations are compute-bound or memory-bound
+3. **Realistic Profiling**: Accounting for real-world factors like write-to-read delays, Tensor Core utilization, and diverse workload sizes
+4. **Latency Prediction**: Building a prediction model based on calibrated hardware characteristics and operation profiles
 
 ## Target Environment
 
@@ -38,10 +49,12 @@ The project is organized as follows:
     -   **`calculate_ridge_point.py`**: Calculates the ridge point for the Roofline model.
 -   **`desk/`**: Contains markdown files for project documentation and progress tracking.
 
-## Profiling Scripts
+## Components
 
-### Kernel Profiling
-Each kernel profiling script measures the GPU latency of a specific operation using:
+CHIP consists of two main components that work together to enable accurate latency prediction:
+
+### 1. Kernel Profiling
+Measures the actual latency of individual deep learning operations on the target GPU. Each kernel profiling script uses:
 - **CUDA Events** (`torch.cuda.Event`) for precise GPU-side timing
 - **Warm-up runs** to stabilize GPU state (frequency, cache)
 - **Multiple profiling runs** (default: 100) for statistical averaging
@@ -62,16 +75,20 @@ Each kernel profiling script measures the GPU latency of a specific operation us
 - Various GEMM sizes
 - Embedding operations
 
-### Roofline Profiling
-The Roofline model helps identify whether operations are compute-bound or memory-bound:
+### 2. Hardware Calibration (Roofline Profiling)
+Characterizes the GPU's actual performance limits to calibrate the prediction model. The Roofline model identifies whether operations are compute-bound or memory-bound:
 
-- **`measure_peak_flops.py`**: Measures the GPU's peak computational throughput (TFLOPS) using FP16 matrix multiplications
-- **`measure_peak_bandwidth.py`**: Measures the GPU's peak memory bandwidth (GB/s) using large memory copy operations
+- **`measure_peak_flops.py`**: Measures the GPU's achieved peak computational throughput (TFLOPS) using FP16 matrix multiplications
+- **`measure_peak_bandwidth.py`**: Measures the GPU's achieved peak memory bandwidth (GB/s) using large memory copy operations
 - **`calculate_ridge_point.py`**: Calculates the ridge point (FLOP/Byte) that determines the boundary between compute-bound and memory-bound operations
 
-The ridge point is calculated as: `Ridge Point = Peak FLOPS / Peak Bandwidth`
+**Ridge Point Formula**: `Ridge Point = Peak FLOPS / Peak Bandwidth`
 
-Kernels with operational intensity (FLOP/Byte) below the ridge point are memory-bound, while those above are compute-bound.
+This calibration is essential because:
+- Theoretical specs don't reflect real-world performance
+- Different workloads achieve different levels of hardware utilization
+- Understanding bottlenecks enables better prediction and optimization
+- Kernels with operational intensity below the ridge point are memory-bound; those above are compute-bound
 
 ## How to Run
 
@@ -119,23 +136,33 @@ Kernels with operational intensity (FLOP/Byte) below the ridge point are memory-
 
     The Roofline scripts will output peak performance metrics and the ridge point for classifying operations as compute-bound or memory-bound.
 
-## Evaluation & Recommendations
+## Current Status & Roadmap
 
-### Strengths
-- ✅ Correct GPU timing methodology using CUDA Events
-- ✅ Proper warm-up and synchronization
-- ✅ Consistent code structure across all scripts
+### ✅ Completed
+- Hardware calibration framework (Roofline model)
+- Basic kernel profiling for common operations
+- Ridge point calculation for bottleneck identification
 
-### Areas for Improvement
-1. **Statistical metrics**: Add standard deviation, median, min/max (not just average)
-2. **Parameter sweeps**: Test multiple batch sizes, sequence lengths, hidden dimensions
-3. **LLM-relevant operations**: Add Attention mechanisms (most important for LLM inference)
-4. **Result persistence**: Save results to CSV/JSON for analysis
-5. **Memory profiling**: Track GPU memory usage alongside latency
-6. **Advanced profiling**: Consider using `torch.profiler` for kernel-level analysis
+### 🚧 In Progress
+See [progress_summary.md](desk/progress_summary.md) for detailed status and evaluation.
 
-### Usage for vLLM Prediction
-The current approach measures individual operations in isolation. For accurate vLLM inference time prediction:
-- Consider operation fusion and overlap effects
-- Account for vLLM-specific optimizations (PagedAttention, continuous batching)
-- Profile with actual model architectures when possible
+### 🎯 Key Next Steps for Accurate Latency Prediction
+1. **Hardware Calibration Improvements**:
+   - Account for write-to-read delays in memory bandwidth measurement
+   - Measure realistic FLOPS with diverse matrix sizes and Tensor Core utilization
+
+2. **Critical Missing Operations**:
+   - Self-Attention / Multi-Head Attention profiling (highest priority for LLM)
+   - Softmax, Embedding lookups
+
+3. **Prediction Model Development**:
+   - Calculate operational intensity for each kernel
+   - Build regression model mapping profiles to actual inference time
+   - Validate against real vLLM workloads
+
+### Design Philosophy
+CHIP's calibration-based approach differs from simple kernel profiling by:
+- Measuring actual hardware limits, not theoretical specs
+- Identifying performance bottlenecks (compute vs memory bound)
+- Accounting for real-world factors (delays, utilization, diverse workloads)
+- Building predictive models grounded in measured hardware characteristics
