@@ -9,9 +9,10 @@ The project measures GPU performance characteristics and operation latencies to 
 CHIP addresses the challenge of accurately predicting LLM inference latency by:
 
 1. **Hardware Calibration**: Measuring actual GPU performance limits (peak FLOPS, memory bandwidth, ridge point) rather than relying on theoretical specifications
-2. **Bottleneck Identification**: Using Roofline model analysis to determine whether operations are compute-bound or memory-bound
-3. **Realistic Profiling**: Accounting for real-world factors like write-to-read delays, Tensor Core utilization, and diverse workload sizes
-4. **Latency Prediction**: Building a prediction model based on calibrated hardware characteristics and operation profiles
+2. **Calibration Factor Development**: Creating correction factors that account for real-world performance degradation (write-to-read delays, SM utilization, workload diversity)
+3. **Bottleneck Identification**: Using Roofline model analysis to determine whether operations are compute-bound or memory-bound
+4. **Realistic Profiling**: Applying calibration factors to hardware performance metrics for accurate modeling
+5. **Latency Prediction**: Building a prediction model based on calibrated hardware characteristics and operation profiles
 
 ## Target Environment
 
@@ -84,11 +85,27 @@ Characterizes the GPU's actual performance limits to calibrate the prediction mo
 
 **Ridge Point Formula**: `Ridge Point = Peak FLOPS / Peak Bandwidth`
 
-This calibration is essential because:
-- Theoretical specs don't reflect real-world performance
-- Different workloads achieve different levels of hardware utilization
-- Understanding bottlenecks enables better prediction and optimization
-- Kernels with operational intensity below the ridge point are memory-bound; those above are compute-bound
+### Calibration Factor Methodology
+
+CHIP introduces **Calibration Factors** to bridge the gap between ideal measurements and real-world performance:
+
+**Why Calibration Factors?**
+- Theoretical GPU specs (e.g., 312 TFLOPS for A100) rarely reflect actual achievable performance
+- Ideal benchmarks (large matrix multiplications, sequential memory access) don't represent diverse workloads
+- Real workloads suffer from: write-to-read delays, suboptimal SM utilization, irregular matrix sizes, memory hierarchy effects
+
+**How Calibration Works:**
+1. **Measure Ideal Performance**: Peak FLOPS and bandwidth under optimal conditions
+2. **Measure Realistic Performance**: Performance under diverse workload conditions (various sizes, access patterns)
+3. **Calculate Calibration Factor**: `CF = Realistic Performance / Ideal Performance`
+4. **Apply to Predictions**: `Predicted Latency = f(Calibrated_FLOPS, Calibrated_BW, Operation_Profile)`
+
+**Example Calibration Factors:**
+- **Memory Bandwidth CF**: Accounts for write-to-read turnaround penalties (~0.7-0.9x ideal)
+- **FLOPS CF per SM**: Reflects staircase latency behavior for varying matrix sizes (~0.6-0.95x ideal)
+- **Tensor Core Utilization CF**: Actual utilization vs theoretical peak (~0.5-0.85x depending on workload)
+
+This approach ensures predictions are grounded in **achievable** hardware performance, not theoretical maximums.
 
 ## How to Run
 
@@ -147,9 +164,11 @@ This calibration is essential because:
 See [progress_summary.md](desk/progress_summary.md) for detailed status and evaluation.
 
 ### 🎯 Key Next Steps for Accurate Latency Prediction
-1. **Hardware Calibration Improvements**:
-   - Account for write-to-read delays in memory bandwidth measurement
-   - Measure realistic FLOPS with diverse matrix sizes and Tensor Core utilization
+1. **Calibration Factor Measurement**:
+   - Measure write-to-read delay effects on memory bandwidth → derive Memory BW Calibration Factor
+   - Profile FLOPS across diverse matrix sizes to capture SM utilization patterns → derive FLOPS Calibration Factor
+   - Measure Tensor Core utilization under various workloads → derive Tensor Core CF
+   - Create hierarchical Roofline model accounting for cache/memory hierarchy
 
 2. **Critical Missing Operations**:
    - Self-Attention / Multi-Head Attention profiling (highest priority for LLM)
@@ -157,12 +176,16 @@ See [progress_summary.md](desk/progress_summary.md) for detailed status and eval
 
 3. **Prediction Model Development**:
    - Calculate operational intensity for each kernel
-   - Build regression model mapping profiles to actual inference time
+   - Apply calibration factors to hardware performance metrics
+   - Build regression model mapping calibrated profiles to actual inference time
    - Validate against real vLLM workloads
 
 ### Design Philosophy
 CHIP's calibration-based approach differs from simple kernel profiling by:
-- Measuring actual hardware limits, not theoretical specs
-- Identifying performance bottlenecks (compute vs memory bound)
-- Accounting for real-world factors (delays, utilization, diverse workloads)
-- Building predictive models grounded in measured hardware characteristics
+- **Measuring actual hardware limits**, not theoretical specs
+- **Deriving calibration factors** that quantify the gap between ideal and realistic performance
+- **Identifying performance bottlenecks** (compute vs memory bound) through Roofline analysis
+- **Accounting for real-world factors** (write-to-read delays, SM utilization, diverse workloads, memory hierarchy)
+- **Building predictive models** grounded in calibrated (not theoretical) hardware characteristics
+
+**Key Insight**: By measuring how much real workloads deviate from ideal conditions (via calibration factors), CHIP can accurately predict latency for unseen workloads without exhaustive profiling of every possible configuration.
